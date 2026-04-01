@@ -1,0 +1,243 @@
+\documentclass{article}
+\usepackage{graphicx} % Required for inserting images
+
+
+% ---------- packages ----------
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath, amssymb, amsthm, bm, mathtools}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{microtype}
+
+% ---------- macros ----------
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\Tkn}{\mathcal{T}}
+\newcommand{\Flow}{\Phi}
+\newcommand{\Attn}{\mathrm{attn}}
+\newcommand{\MLP}{\mathrm{mlp}}
+\newcommand{\Fric}{\mathrm{fric}}
+\newcommand{\Lie}{\mathrm{Lie}}
+\newcommand{\Strang}{\mathrm{Strang}}
+\newcommand{\tol}{\mathrm{tol}}
+\newcommand{\NFE}{\mathrm{NFE}}
+\newcommand{\diag}{\mathrm{diag}}
+\newcommand{\half}{\tfrac{1}{2}}
+
+\title{\textbf{Structure-Aware Split-Flow ODE Solver}}
+\author{jeon.isavelle@gmail.com}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We propose a structure-aware split-flow ODE solver for ViTs. Instead of applying a black-box ODE solver to the full transformer dynamics, we decompose the vector field into attention-induced mixing, token-wise MLP reaction, and friction/retention flows. The resulting solver is implemented through operator splitting, optionally with adaptive step-size control based on split-pair error estimation. This design aims to improve stability, and to compute allocation during inference.
+\end{abstract}
+
+\section{Introduction}
+
+Vision Transformers (ViTs) are effective for modeling global context; however, in 3D volumes, the number of tokens grows rapidly, leading to a substantial computational burden. This issue becomes particularly important in medical image segmentation, where volumetric inputs require both fine spatial reasoning and long-range contextual modeling. As a result, directly applying standard ViT blocks to 3D data often yields high computational cost and limited flexibility in allocating computation according to the difficulty of the input.
+
+To address this issue, this report considers a structure-aware adaptive computation framework based on an ODE interpretation of transformer blocks. Rather than relying solely on a generic black-box continuous-depth formulation, we design a split-flow solver that explicitly reflects the internal structure of the transformer. In particular, the proposed approach decomposes the dynamics into attention, MLP, and retention/friction flows, and connects this decomposition to an operator-splitting-based numerical scheme. Within this formulation, adaptive step-size control serves as a mechanism for adjusting computational effort according to the complexity of the latent dynamics, providing a principled link between continuous-time modeling and efficient inference in 3D segmentation.
+
+\paragraph{Main idea}
+Let the token state be
+\begin{equation}
+    u(t) \in \R^{T \times d},
+\end{equation}
+where $T$ is the number of tokens and $d$ is the embedding dimension. Rather than defining a single undifferentiated vector field $u' = f(u,t)$, we design a structured decomposition that reflects the internal organization of the transformer block.
+
+\paragraph{Contributions}
+\begin{enumerate}[leftmargin=1.5em]
+    \item A three-way decomposition of the transformer dynamics into attention, MLP, and friction flows.
+    \item A Lie--Trotter / Strang split solver tailored to this decomposition (A symmetric second-order split solver tailored to this decomposition three operators).
+    \item An optional adaptive controller based on split-pair local error estimation.
+    \item A practical stability interpretation via bounded gates and contraction-like retention.
+\end{enumerate}
+
+\section{Method}
+
+\subsection{Decomposition of the Vector Field}
+We decompose the dynamics as
+\begin{equation}
+    \frac{du}{dt} = f_{\Attn}(u,t) + f_{\MLP}(u,t) + f_{\Fric}(u).
+\end{equation}
+Here denotes:
+\begin{itemize}[leftmargin=1.5em]
+    \item $f_{\Attn}$ the attention-induced token mixing dynamics,
+    \item $f_{\MLP}$ the token-wise nonlinear reaction dynamics,
+    \item $f_{\Fric}$ the retention/friction term that stabilizes the evolution.
+\end{itemize}
+
+We adopt the retention--forcing form
+\begin{equation}
+    u' + P(u)u = Q(u),
+\end{equation}
+which can be rewritten as
+\begin{equation}
+    u' = -P(u)u + Q(u).
+\end{equation}
+We further split the forcing term into
+\begin{equation}
+    Q(u) = Q_{\Attn}(u) + Q_{\MLP}(u),
+\end{equation}
+so that
+\begin{equation}
+    f_{\Fric}(u) = -P(u)u,
+    \qquad
+    f_{\Attn}(u,t) = Q_{\Attn}(u,t),
+    \qquad
+    f_{\MLP}(u,t) = Q_{\MLP}(u,t).
+\end{equation}
+
+\paragraph{Design note.}
+To limit drift and explosion, we use bounded gates for the coefficients in $P$ and the forcing terms.
+
+\subsection{Sub-Flow Maps}
+Each sub-vector field induces a flow map over step size $h$:
+\begin{equation}
+    \phi_{\Attn}^{h},
+    \qquad
+    \phi_{\MLP}^{h},
+    \qquad
+    \phi_{\Fric}^{h}.
+\end{equation}
+The friction flow can be treated in a particularly simple manner. If $P(u)$ is frozen over a substep, then
+\begin{equation}
+    u' = -\widehat{P}u
+\end{equation}
+has the closed-form update
+\begin{equation}
+    u_{n+1} = \exp(-h\widehat{P})u_n.
+\end{equation}
+For diagonal or channel-wise $\widehat{P}$, this update is cheap and explicitly damping.
+
+\subsection{Split Solver}
+Given that the proposed dynamics are decomposed into three components, the research focuses on implementing a symmetric second-order splitting adapted to the three-way decomposition. Let
+\begin{equation}
+    A := f_{\Fric},
+    \qquad
+    B := f_{\Attn},
+    \qquad
+    C := f_{\MLP}.
+\end{equation}
+
+A first-order Lie--Trotter approximation is given by
+\begin{equation}
+    \Flow_h^{\Lie}
+    \approx
+    \phi_{\MLP}^{h}
+    \circ
+    \phi_{\Attn}^{h}
+    \circ
+    \phi_{\Fric}^{h}.
+\end{equation}
+A symmetric second-order Strang-style solver can be written as
+\begin{equation}
+    \Flow_h^{\Strang}
+    \approx
+    \phi_{\Fric}^{h/2}
+    \circ
+    \phi_{\Attn}^{h/2}
+    \circ
+    \phi_{\MLP}^{h}
+    \circ
+    \phi_{\Attn}^{h/2}
+    \circ
+    \phi_{\Fric}^{h/2}.
+\end{equation}
+
+Equivalently, in exponential notation,
+\begin{equation}
+    \Flow_h^{\Strang}
+    \approx
+    e^{\frac{h}{2}A}
+    e^{\frac{h}{2}B}
+    e^{hC}
+    e^{\frac{h}{2}B}
+    e^{\frac{h}{2}A}.
+\end{equation}
+
+\paragraph{Why splitting?}
+The split solver makes the role of each mechanism explicit and allows distinct numerical treatment for mixing, reaction, and contraction. In practice, this can improve the stability and accuracy trade-off relative to a single black-box solver under the same computational budget.
+
+\subsection{Adaptive Step-Size Control}
+
+To support adaptive computation, we estimate local error through a split-pair controller. Let
+\begin{equation}
+    u_{n+1}^{(1)} = \Flow_h^{\Lie}(u_n),
+    \qquad
+    u_{n+1}^{(2)} = \Flow_h^{\Strang}(u_n).
+\end{equation}
+We define the normalized local error surrogate as
+\begin{equation}
+    e_n
+    =
+    \frac{\lVert u_{n+1}^{(2)} - u_{n+1}^{(1)} \rVert}
+    {\mathrm{atol} + \mathrm{rtol}\,\lVert u_{n+1}^{(2)} \rVert}.
+\end{equation}
+If $e_n \le 1$, the step is accepted; otherwise the step is rejected and recomputed with a smaller $h$.
+
+\section{Implementation}
+
+\subsection{Block-Level Update}
+One ODE block applies the following sequence:
+\begin{enumerate}[leftmargin=1.5em]
+    \item compute or freeze friction coefficients $P(u_n)$,
+    \item apply a half or full friction update,
+    \item apply attention subflow on the current token state,
+    \item apply MLP subflow token-wise,
+    \item recombine according to Lie or Strang ordering.
+\end{enumerate}
+
+
+\subsection{Practical Options}
+\begin{itemize}[leftmargin=1.5em]
+    \item \textbf{Friction parameterization:} scalar, channel-wise diagonal, or token-wise diagonal.
+    \item \textbf{Attention subsolver:} Euler, midpoint, or short RK2 on a frozen attention operator.
+    \item \textbf{MLP subsolver:} explicit residual step or token-wise micro-step update.
+    \item \textbf{Adaptive controller:} enabled during inference only, disabled during training if needed for stability.
+\end{itemize}
+
+\section{Expected Advantages}
+\begin{itemize}[leftmargin=1.5em]
+    \item \textbf{Interpretability:} separates token mixing, token-local reaction, and retention.
+    \item \textbf{Stability control:} friction acts as an explicit contraction-like mechanism.
+    \item \textbf{Compute allocation:} adaptive step control allows variable computational effort.
+    \item \textbf{Modularity:} each subflow can be assigned a solver appropriate to its structure.
+\end{itemize}
+
+\section{Limitations and Caveats}
+\begin{itemize}[leftmargin=1.5em]
+    \item Attention and MLP flows are generally non-commutative, so splitting error may be nontrivial.
+    \item If all tokens are evolved as one global state, adaptivity remains mostly global rather than strictly region-wise.
+    \item Excessively weak friction may fail to stabilize the dynamics; excessively strong friction may oversmooth features.
+    \item The method improves numerical control, but does not by itself constitute a full convergence proof.
+\end{itemize}
+
+\section{Conclusion}
+TODO
+
+\section{Future Work}
+The further research would include:
+
+\begin{itemize}[leftmargin=1.5em]
+    \item complete appendix sector,
+    \item exploring alternative symmetric second-order orderings for the three-operator decomposition,
+    \item comparing fixed-step and adaptive split solvers empirically.
+\end{itemize}
+
+% ---------- optional appendix ----------
+\appendix
+\section{Notation Checklist}
+\begin{itemize}[leftmargin=1.5em]
+    \item $T$: number of tokens
+    \item $d$: embedding dimension
+    \item $u(t) \in \R^{T \times d}$: token state
+    \item $h$: solver step size
+    \item $P(u)$: friction/retention coefficient map
+    \item $Q_{\Attn}, Q_{\MLP}$: attention and MLP forcing terms
+\end{itemize}
+
+\end{document}
