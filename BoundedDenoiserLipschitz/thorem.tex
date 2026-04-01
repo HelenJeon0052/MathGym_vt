@@ -1,0 +1,257 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage{bm}
+\usepackage{hyperref}
+\usepackage{geometry}
+\geometry{a4paper, margin=1in}
+
+\title{[minireport]BoundedDenoiser}
+\author{jeon.isavelle@gmail.com}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+While a deep neural network $D_{\sigma}$ can act as an effective denoiser, an arbitrary architecture lacks the necessary regularity for iterative optimization.
+As the noise level $\sigma$ decreases, the denoiser often exhibits significant instability, where artifacts are amplified over successive iterations.
+In frameworks such as Half-Quadratic Splitting (HQS) or ADMM, a lack of structural constraints prevents the algorithm from reaching a stable fixed point, leading to degraded image quality.
+
+Among representative formulations including such as bounded denoiser, nonexpensive denoiser, averaged operator, the methodology of bounded denoiser will be experimented and proved.
+This choice is motivated by following advantages:
+
+\begin{itemize}
+    \item it enables the stable implementation of diminishing-$\sigma$ strategies.
+    \item it provides fixed-point convergence guarantees even in nonconvex and ill-posed inverse problems, such as Poisson denoising and blind deconvolution, where the data-fidelity term may be non-Lipschitz or not strongly convex.
+\end{itemize}
+
+\subsection{Stable Implementation of Diminishing $\sigma$ Strategies}
+Lipschitz-constrained denoisers make it possible to implement diminishing-$\sigma$ continuation strategies in a stable and controlled manner.
+This is a key requirement for adaptive PnP-ADMM, particularly in nonconvex and ill-posed settings such as Poisson denoising and blind deconvolution, where the data-fidelity term may fail to satisfy standard assumptions such as Lipschitz continuity or strong convexity.
+
+
+
+
+\section{Background}
+To analyze and stabilize the iterative trajectory of Plug-and-Play (PnP) methods, several geometric and operator-theoretic quantities must be characterized at each iteration.
+In particular, convergence behavior is closely related to the regularity of the denoiser, the structure of the PnP-ADMM update, and the local sensitivity of the denoiser as measured by its Jacobian.
+
+\subsection{Theory of Lipschitz Convergence}
+A standard route to provable convergence in PnP methods is to impose a Lipschitz constraint on the denoiser.
+If the overall iteration becomes contractive, the Banach contraction principle guarantees convergence to a unique fixed point, typically with linear (geometric) convergence rate.
+
+A common requirement is that the denoiser be nonexpansive, or preferably contractive:
+\begin{equation}
+    \|D(x) - D(y)\|_2 \le L \|x - y\|_2,
+\end{equation}
+where $0 \le L \le 1$.
+When $L \le 1$, the operator is nonexpansive; when $L < 1$, it is contractive.
+
+Such regularity is particularly important in iterative inverse problems, where repeated application of an unstable denoiser can amplify perturbations and prevent convergence.
+
+\subsection{PnP-ADMM}
+Consider the inverse problem
+\begin{equation}
+    \min_x f(x) + g(x),
+\end{equation}
+where $f(x)$ is a data-fidelity term and $g(x)$ is a regularization term.
+In Plug-and-Play ADMM, the proximal operator associated with $g$ is replaced by a learned denoiser $D_\sigma$.
+The resulting iteration is
+\begin{align}
+    x^{k+1} &= \arg\min_x \; f(x) + \frac{\rho}{2}\|x - v^k + u^k\|_2^2, \\
+    v^{k+1} &= D_\sigma(x^{k+1} + u^k), \\
+    u^{k+1} &= u^k + x^{k+1} - v^{k+1},
+\end{align}
+where $\rho > 0$ is the penalty parameter and $u^k$ is the scaled dual variable.
+
+The convergence of this scheme depends critically on the regularity of $D_\sigma$.
+If the denoiser is excessively sensitive, especially at small noise levels, the iteration may fail to approach a stable fixed point.
+
+\subsection{Jacobian-Vector Product}
+Let $f : \mathbb{R}^n \to \mathbb{R}^m$ be a differentiable function and let $x \in \mathbb{R}^n$.
+The Jacobian matrix of $f$ at $x$ is defined by
+\begin{equation}
+    J_{ij}(x) = \frac{\partial f_i}{\partial x_j}(x).
+\end{equation}
+
+For an arbitrary vector $v \in \mathbb{R}^n$, the Jacobian-vector product (JVP) is defined as
+\begin{equation}
+    J(x)v
+    = \left.\frac{d}{d\epsilon} f(x + \epsilon v)\right|
+    = \lim_{\epsilon \to 0} \frac{f(x + \epsilon v) - f(x)}{\epsilon}.
+\end{equation}
+
+This quantity is exactly the directional derivative of $f$ at $x$ along direction $v$.
+The goal is to improve the stability of the denoiser used inside PnP iterations by controlling its local sensitivity and approximate Lipschitz behavior.
+
+\subsection{Jacobian Regularization}
+One practical strategy is to penalize the magnitude of Jacobian-vector products during training.
+Adding a regularization term of the form $\|Jv\|_2^2$ encourages the denoiser to behave more smoothly with respect to input perturbations, which can substantially improve optimization stability.
+
+We regularize the Jacobian of the residual map
+\begin{equation}
+    R(x) = x - H(x),
+\end{equation}
+where $H$ denotes the denoiser or restoration operator.
+
+A computationally efficient estimator can be constructed using Hutchinson's trick together with JVPs:
+\begin{equation}
+    \mathcal{L}_{\mathrm{jac}}
+    = \mathbb{E}_{x,z}\left[\|J_R(x) z\|_2^2\right],
+    \qquad z \sim \mathcal{N}(0, I).
+\end{equation}
+
+This penalty discourages large local amplification in random directions and therefore promotes smoother, more stable operator behavior.
+
+\subsection{Real Spectral Normalization}
+As a complementary strategy, Real Spectral Normalization (RealSN) aims to bound the approximate Lipschitz constant of the denoiser, preferably through its residual operator.
+By controlling the operator norm, RealSN promotes nonexpansive or contraction-like behavior, which is desirable for stabilizing iterative PnP updates.
+
+From the perspective of fixed-point theory, this form of spectral control is attractive because it directly targets the mechanism responsible for iterative instability: local expansion of perturbations under repeated denoising steps.
+Therefore, Jacobian regularization and RealSN can be viewed as two complementary tools for improving convergence robustness in PnP reconstruction.
+
+\subsection{Why Regularize the Residual Map?}
+In practice, it is often more natural to control the residual map
+\begin{equation}
+    R(x) = x - H(x)
+\end{equation}
+rather than directly regularizing the denoiser $H$ itself.
+
+The main reason is that the residual map isolates the \emph{correction} applied by the denoiser relative to the identity operator.
+
+From a differential viewpoint, the Jacobian of the residual map is
+\begin{equation}
+    J_R(x) = I - J_H(x).
+\end{equation}
+Therefore, controlling $J_R(x)$ amounts to controlling how far the denoiser deviates locally from the identity mapping.
+This is particularly relevant in PnP algorithms, where overly aggressive denoising may destroy data-consistent structure and destabilize the fixed-point iteration.
+
+\subsection{Connection to PnP Stability}
+By encouraging smoother residual corrections and bounding the effective Lipschitz behavior of the denoiser, Jacobian regularization and RealSN improve the stability of the composed iterative map.
+This makes diminishing-$\sigma$ schedules more reliable and better suited to ill-posed inverse problems.
+
+
+\section{Protocol}
+
+\subsection{Regularization and Stabilization Settings}
+We evaluate two complementary stabilization strategies for the denoiser used in PnP-ADMM: Jacobian regularization and Real Spectral Normalization (RealSN).
+
+For Jacobian regularization, we consider the penalty
+\begin{equation}
+    \mathcal{L}_{\mathrm{jac}}
+    = \mathbb{E}_{x,z}\left[\|J_R(x)z\|_2^2\right],
+    \qquad z \sim \mathcal{N}(0, I),
+\end{equation}
+where $R(x) = x - H(x)$ denotes the residual map.
+In practice, the following hyperparameter settings are used:
+\begin{itemize}
+    \item Jacobian regularization weight: $\beta \in \{0, 10^{-4}, 10^{-3}, 10^{-2}\}$,
+    \item number of random probe vectors: \texttt{z\_samples} $=1$ per batch.
+\end{itemize}
+Using a single probe vector per batch provides a computationally efficient estimator while keeping the notebook-based experiments tractable.
+
+For Real Spectral Normalization, we follow a two-phase implementation strategy.
+In Phase 1, we use PyTorch's spectral normalization parametrization on convolutional layers for fast and robust experimentation.
+In Phase 2, we implement a more paper-faithful RealSN variant, where each convolution is treated as a linear operator and its dominant singular value $\sigma(K_\ell)$ is estimated via power iteration and renormalization.
+
+The main experimental knobs for RealSN:
+\begin{itemize}
+    \item spectral normalization: on/off,
+    \item global scaling factor: $c \in \{1.0, 0.95, 0.9, 0.8\}$.
+\end{itemize}
+
+
+For analysis, we log the following quantities:
+\begin{enumerate}
+    \item Jacobian term: $\mathrm{mean}(\|J_R(x)z\|_2^2)$,
+    \item per-layer spectral norm estimates: $\sigma(K_\ell)$,
+    \item maximum and mean spectral norms across layers,
+    \item the effective scaling budget $c_\ell$ applied to each layer.
+\end{enumerate}
+
+\subsection{Data and Split}
+Experiments are conducted on a CT dataset.
+The dataset is divided into training, validation, and test sets, where the validation split is used for hyperparameter selection and the test split is used only for final evaluation.
+When synthetic inverse problems are considered, measurements are generated from clean images $x_0$ using a predefined forward operator and noise model, so that reconstruction quality can be evaluated against ground truth.
+
+\subsection{Experimental Procedure}
+The overall experimental pipeline is as follows:
+\begin{enumerate}
+    \item define the inverse problem and measurement model;
+    \item load a pretrained denoiser;
+    \item run the PnP-ADMM iteration under a selected continuation schedule;
+    \item evaluate convergence behavior, reconstruction quality, and stability-related proxy metrics.
+\end{enumerate}
+
+We also study continuation schedules for the ADMM penalty parameter $\rho$.
+When continuation is enabled, $\rho$ is updated according to
+\begin{equation}
+    \rho_{k+1} = \gamma \rho_k.
+\end{equation}
+For ViT- or DiT-like denoisers, we use $\gamma = 1.01$ as the default setting, since smaller increments often reduce oscillatory behavior.
+For CNN- or U-Net-based denoisers, values in the range
+\begin{equation}
+    \gamma \in [1.05, 1.1]
+\end{equation}
+often work well in practice.
+A small grid search over $\gamma$ is performed in \texttt{03\_ablation\_grid.ipynb}.
+
+\subsection{Evaluation Axes and Metrics}
+We evaluate the method along three primary axes:
+\begin{itemize}
+    \item spectral normalization: off vs.\ on, including the scaling sweep over $c$,
+    \item Jacobian regularization: sweep over $\beta$,
+    \item continuation schedule: sweep over $\gamma$.
+\end{itemize}
+
+The evaluation metrics are grouped into three categories.
+
+\paragraph{Convergence.}
+We measure:
+\begin{itemize}
+    \item final primal residual $r^k$,
+    \item number of iterations required to reach a prescribed tolerance,
+    \item divergence or oscillation rate across runs.
+\end{itemize}
+
+\paragraph{Reconstruction quality.}
+For synthetic experiments where the clean target $x_0$ is available, we report:
+\begin{itemize}
+    \item PSNR,
+    \item SSIM.
+\end{itemize}
+
+\paragraph{Bound-related proxy metrics.}
+To analyze the stabilization effect of the proposed regularizers, we log:
+\begin{itemize}
+    \item maximum and mean layer spectral norms,
+    \item magnitude of the Jacobian regularization term.
+\end{itemize}
+
+This design yields a clear trade-off analysis:
+spectral normalization improves global stability, Jacobian regularization suppresses local jitter and oscillatory updates, and their combination is expected to improve both the reliability and speed of convergence toward a stable solution $x^\ast$.
+
+\subsection{Expected Outcome}
+We expect the proposed stabilization strategies to reduce oscillatory behavior in PnP-ADMM and improve convergence toward a fixed point.
+In particular, the discrepancy between the primal variable and the denoised auxiliary variable is expected to decrease over iterations, i.e.,
+\begin{equation}
+    \|x^k - z^k\|_2 \rightarrow 0.
+\end{equation}
+At the same time, we expect improved reconstruction quality and more stable behavior under diminishing-noise or continuation-based schedules.
+
+\section{Limitations}
+Despite the expected stability benefits, several limitations remain.
+
+\begin{itemize}
+    \item stronger regularization may improve stability at the cost of reconstruction sharpness.
+    If $\gamma$ is too large, the algorithm may terminate or become numerically unstable before the denoiser fully exhibits the intended bounded or contractive behavior.
+    In such cases, the practical benefit of denoiser regularization may be weakened.
+    \item proxy quantities such as Jacobian norms or layerwise spectral norms do not by themselves constitute a full convergence proof for the entire nonlinear PnP iteration.
+\end{itemize}
+
+
+
+
+\end{document}

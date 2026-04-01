@@ -1,0 +1,18 @@
+# BoundedDenoiserLipschitz
+
+
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = 'BoundedDenoiserLipschitz'
+version = '0.1.0'
+description = 'Stabilizing Plug-and-Play Reconstruction with Bounded Denoiser'
+readme = 'README.md'
+requires-python = '>=3.10'
+dependencies = ["torch", "safetensors", "numpy"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
