@@ -148,7 +148,7 @@ e^{\frac{h}{2}B}
 e^{\frac{h}{2}A}.
 \]
 
-This is not the standalone classical Strang splitting for two operators, but a **symmetric second-order splitting adapted to the three-way decomposition**.
+This is a **symmetric second-order splitting adapted to the three-way decomposition**.
 
 ---
 
@@ -198,52 +198,140 @@ In the current formulation, this adaptivity is mainly expressed at the **global 
 
 ## Experimental Design
 
-### Exp-A: Baseline Wit ODE Block
+### Exp-A: Discrete ViT Baseline
+A standard residual transformer block is used as the baseline on a ViT-style 3D segmentation backbone.
 
-A test for residual transformer block is implemented as the proposed method:
-
-Configuration:
-
-- residual transformer blocks are tested along with fixed depth on ViT-style segmentation backbone
+- no ODE formulation
 - no splitting
 - no adaptive control
 
-This experiment serves as the control group for testing whether “continuous depth alone” is sufficient.
+This serves as the reference point for segmentation quality and computational cost.
 
-### Exp-B: ODE Block Without Splitting
-
-A monolithic continuous-depth block is inserted at the same position as the proposed method:
-
+### Exp-B: Monolithic ODE Block
+A continuous-depth block is inserted at the same position:
 \[
-u' = f_{\mathrm{mono}}(u,t),
-\qquad
+u' = f_{\mathrm{mono}}(u,t), \qquad
 f_{\mathrm{mono}}(u,t) = f_{\mathrm{attn}}(u,t) + f_{\mathrm{mlp}}(u,t).
 \]
 
-Configuration:
-
-- attention and MLP are treated **together**
+- attention and MLP are treated together
 - fixed-step Euler or RK-based integration
 - no splitting
 - no adaptive control
 
-This experiment serves as the control group for testing whether “continuous depth alone” is sufficient.
+This tests whether **continuous-depth modeling alone** is sufficient.
 
 ### Exp-C: Split-Flow Solver, Fixed-Step
 
 The main experiment uses the structured decomposition
-
 \[
 u' = f_{\mathrm{attn}}(u,t) + f_{\mathrm{mlp}}(u,t) + f_{\mathrm{fric}}(u),
 \]
-
 with:
 
 - Lie or symmetric second-order splitting
 - no adaptive controller
-- fixed step counts such as \(1, 2, 3\)
+- fixed step counts such as \(1,2,3\)
 
-This experiment isolates the effect of **structured splitting** from the effect of **continuous-depth modeling itself**.
+This isolates the effect of **structured splitting** from continuous-depth modeling itself.
+
+### Exp-D: Split-Flow Solver, Adaptive
+An optional extension of Exp-C introduces adaptive step-size control.
+
+- structured decomposition
+- split-pair error estimation
+- adaptive step acceptance / rejection
+
+This is intended to evaluate whether computation can be allocated more efficiently during inference.
+
+
+---
+
+## Repository Tree
+```text
+SplitFlowODESolver/
+├─ README.md
+├─ pyproject.toml
+├─ .gitignore
+│
+├─ configs/
+│  ├─ brats_train.yaml
+│  ├─ ablation_mixmode_brats.yaml
+│  └─ model_light3dvit.yaml
+│
+├─ julia/
+│  ├─ main.jl
+│  ├─ inference.jl
+│  ├─ save_nifti.jl
+│  └─ ...
+│
+└─ src/
+   └─ AnomalyDetectionVit/
+      ├─ data/
+      │  ├─ preprocess_brats.py
+      │  └─ ...
+      ├─ models/
+      │  ├─ attention.py
+      │  ├─ encoder.py
+      │  ├─ vit_3d.py
+      │  ├─ odevit.py
+      │  ├─ splitting.py
+      │  ├─ hybrid_*.py
+      │  ├─ patching/
+      │  │  └─ ...
+      │  └─ ...
+      ├─ solvers/
+      │  ├─ 
+      │  ├─ 
+      │  └─ ...
+      ├─ tools/
+      │  ├─ export_onnx.py
+      │  ├─ check_onnx.py
+      │  └─ ...
+      ├─ train/
+      │  ├─ train.py
+      │  ├─ train.yaml
+      │  └─ ...
+      ├─ outputs/
+      │  └─ ...
+      └─ ...
+```
+
+This tree should be interpreted as a working experimental layout, not a finalized production structure.
+
+---
+
+## Metrics
+
+
+Segmentation Quality
+
+- Dice
+- voxel-level sensitivity / specificity
+- optional Hausdorff distance
+
+Triage
+
+- AUROC
+- AUPRC
+- sensitivity at fixed specificity
+
+
+Efficiency / Systems
+
+- inference latency
+- FLOPs or approximate compute
+- memory scaling
+
+---
+
+## Ablations
+
+
+- replace only the bottlenecked transformer module
+- vary input volume size / window size / patch size
+- compare memory scaling
+- compare discrete, monolithic ODE, and split-flow ODE variants
 
 ---
 
@@ -269,6 +357,7 @@ This experiment isolates the effect of **structured splitting** from the effect 
 
 ## Future Work
 
+- Add SwinUNETR as a secondary transfer architecture
 - Explore alternative symmetric second-order orderings for the three-operator decomposition
 - Compare fixed-step and adaptive split solvers empirically
 
