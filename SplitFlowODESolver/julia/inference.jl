@@ -139,7 +139,7 @@ function infer_case(case_path::AbstractString; roi_size=nothing)
 end
 
 
-case_path = "../dataset/brats"
+case_path = "../src/SplitFlowODESolver/data/dataset/"
 
 @time begin
     x, y, mask = infer_case(case_path;roi_size=(1.0, 1.0, 1.0))
