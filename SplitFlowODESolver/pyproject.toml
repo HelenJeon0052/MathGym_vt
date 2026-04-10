@@ -1,0 +1,34 @@
+# Structure-Aware Split-Flow ODE Solver
+
+
+
+[build-system]
+requires = ['setuptools>=68','wheel']
+build-backend = 'setuptools.build_meta'
+
+[project]
+name = 'SplitFlowODESolver'
+version = '0.1.0'
+description = 'Structure-Aware Split-Flow ODE Solver Experiment'
+readme = 'README.md'
+requires-python = '>=3.10'
+dependencies = [
+    'torch>=2.0.0',
+    'numpy>=1.24.0',
+    'onnx>=1.21.0',
+    'onnxruntime>=1.24.0',
+    'onnxruntime_gpu>=1.24.0',
+    'pytest>=9.0.3',
+]
+authors = [
+    { name = 'JiinJeon', email = 'jeon.isavelle@gmail.com'},]
+
+[tool.setuptools.packages.find]
+where = ['src']
+include = ['SplitFlowODESolver*']
+
+[project.optional-dependencies]
+dev = [
+    'pytest>=8.0.0',
+    'ruff>=0.3',
+]

@@ -59,13 +59,3 @@ class HybridExportWrapper(nn.Module):
             return seg, cls
 
         raise TypeError(f"Unsupported output: {type(out)}")
-
-def print_model_io(session: ort.InferenceSession) -> None:
-    print("\n[Inputs]")
-    for i, inp in enumerate(session.get_inputs()):
-        print(f"({i}) name={inp.name}, shape={inp.shape}, type={inp.type}")
-    
-    print("\n[Outputs]")
-    for i, out in enumerate(session.get_outputs()):
-        print(f"({i}) name={out.name}, shape={out.shape}, type={out.type}")
-    
