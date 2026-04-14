@@ -22,11 +22,11 @@ from monai.transforms import (
 
 def _pick_one(path_dir: str, sfx: str) -> str:
     p = Path(path_dir)
-    hits = sorted(p.glob(f"*_{sfx}.nii.gz"))
-    if len(hits) != 1:
-        raise FileNotFoundError(
-            f"expected: *_{sfx}.nii.gz, but got multiple set {len(hits)}"
-        )
+    
+    for sfx in ("seg", "t1c","t1n","t2f","t2w"):
+        hits = sorted(p.glob(f"*{sfx}.nii.gz"))
+
+        print(f"[files] brats files: {hits}")
     return str(hits[0])
 
 def _unique_match(path_dir:str, patterns, key:str) -> str:
@@ -78,12 +78,6 @@ def build_brats_input(
     add_batch_dim: bool = True,
 ) ->  np.ndarray:
     """
-
-    expected files:
-        - *_0000.nii.gz -> T1
-        - *_0001.nii.gz -> T1ce
-        - *_0002.nii.gz -> T2
-        - *_0003.nii.gz -> FLAIR
     
     returns
     ------------
@@ -94,24 +88,27 @@ def build_brats_input(
     """
 
     paths = {
-        "t1":_pick_one(path_dir, "0000"),
-        "t1ce":_pick_one(path_dir, "0001"),
-        "t2":_pick_one(path_dir, "0002"),
-        "flair":_pick_one(path_dir, "0003"),
+        "seg":_pick_one(path_dir, "seg"),
+        "t1c":_pick_one(path_dir, "t1c"),
+        "t1n":_pick_one(path_dir, "t1n"),
+        "t2f":_pick_one(path_dir, "t2f"),
+        "t2w":_pick_one(path_dir, "t2w"),
     }
 
+    label_key = ["seg"] 
+    image_keys = ["t1c", "t1n", "t2f", "t2w"]
     txs = [
-        LoadImaged(keys=["t1", "t1ce", "t2", "flair"]),
-        EnsureChannelFirstd(keys=["t1", "t1ce", "t2", "flair"]),
-        Orientationd(keys=["t1", "t1ce", "t2", "flair"], axcodes="RAS"),
+        LoadImaged(keys=image_keys + label_key),
+        EnsureChannelFirstd(keys=image_keys + label_key),
+        Orientationd(keys=image_keys + label_key, axcodes="RAS"),
         Spacingd(
-            keys=["t1", "t1ce", "t2", "flair"],
+            keys=image_keys + label_key,
             pixdim=pixdim,
-            mode=("bilinear", "bilinear", "bilinear", "bilinear"),
+            mode=("bilinear", "bilinear", "bilinear", "bilinear", "nearest"),
         ),
-        ConcatItemsd(keys=["t1", "t1ce", "t2", "flair"], name="image", dim=0),
+        ConcatItemsd(keys=image_keys, name="image", dim=0),
         NormalizeIntensityd(keys="image", nonzero=True, channel_wise=True),
-        ToTensord(keys="image")
+        ToTensord(keys=["image", "seg"])
     ]
 
     if roi_size is not None:
