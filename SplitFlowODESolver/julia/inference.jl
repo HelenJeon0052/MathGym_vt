@@ -101,13 +101,13 @@ function channel_argmax_mask(y::AbstractArray{T, S}) where {T<:Real}
     @assert n ==1
     @assert c >= 2
 
-    mask = Array{UInt8}(undef, d , l, w)
+    mask = Array{UInt8}(undef, d, l, w)
 
     @inbounds for zz in 1:d, yy in 1:l, xx in 1:w
         best_c = 1
         best_val = y[1, 1, zz, yy, xx]
         for cc in 2:c
-            val = y[cc, zz, yy, xx]
+            val = y[1, cc, zz, yy, xx]
             if val > best_val
                 best_val = val
                 best_c =cc
@@ -124,28 +124,35 @@ function infer_case(case_path::AbstractString; roi_size=nothing)
 
     println("input shape = ", size(x))
     outputs = SESSION(Dict(INPUT_NAME => x))
-    println("output shape = ", collect(keys(outputs)))
+    println("output key = ", collect(keys(outputs)))
 
     y = pick_output(outputs)
     println("output size = ", size(y))
     @assert all(isinfinite, y) "Output contains NaN/Inf"
 
     mask = nothing
-    if ndims(y) == S && size(y, 2) >= 2
+    if ndims(y) == 5 && size(y, 2) >= 2
         mask = channel_argmax_mask(y)
     end
 
     return x, y, mask
 end
 
+function inspet_onxx()
+    model_p = joinpath(@__DIR__, "..", "models", "swinunetr_brats.onnx")
+    model = ONNXRunTime.load_inference(model_p)
 
-case_path = "../src/SplitFlowODESolver/data/dataset/"
 
-@time begin
-    x, y, mask = infer_case(case_path;roi_size=(1.0, 1.0, 1.0))
+    println("[inspect onnx] Loaded Model : ", model_p)
+    # println("[inspect onxx] Loaded Output keys : ", keys(output))
+
+
+    println("[inspect onxx] Input name : ", model.input_names)
+    println("[inspect onnx] Output name : ", model.output_names)
+
+    # return model
+
 end
 
-println("Inference successful. Prediction size", size(mask))
 
-niwrite("prediction.nii.gz", NIVolume(mask))
 
