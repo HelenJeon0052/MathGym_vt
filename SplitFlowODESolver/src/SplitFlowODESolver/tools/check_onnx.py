@@ -10,7 +10,10 @@ import onnx
 import onnxruntime as ort
 import numpy as np
 
+from SplitFlowODESolver.utils.onnx_utils import build_checker_input
 
+
+from SplitFlowODESolver.utils.brats.brats_transforms import build_entry_loaders, build_brats_loaders
 
 def print_model_io(session: ort.InferenceSession) -> None:
     print("\n[Inputs]")
@@ -20,19 +23,6 @@ def print_model_io(session: ort.InferenceSession) -> None:
     print("\n[Outputs]")
     for i, out in enumerate(session.get_outputs()):
         print(f"({i}) name={out.name}, shape={out.shape}, type={out.type}")
-
-
-
-
-def brats_input(
-    path_dir: str
-)-> np.ndarray:
-    br_dst:np.ndarray = build_brats_input(path_dir)
-
-    return br_dst
-
-
-# TO-DO : dataset check func
 
 
 def summarize_outputs(outputs: List[np.ndarray], output_names: List[str]) -> None:
@@ -47,7 +37,7 @@ def summarize_outputs(outputs: List[np.ndarray], output_names: List[str]) -> Non
             f"mean={float(np.mean(y)):.3f}"
         )
 
-def check_onxx_graph(model_path:str) -> None:
+def check_onnx_graph(model_path:str) -> None:
     print(f"\n[from onnx] loading graph: {model_path}")
     model = onnx.load(model_path)
     onnx.checker.check_model(model)
@@ -84,7 +74,11 @@ def run_inference(session: ort.InferenceSession, x: np.ndarray) -> None:
 
     print(f"[Inference] x.shape: {x.shape} | x.dtype: {x.dtype}")
     y_list = session.run(output_names, {input_name: x})
-    summarize_outputs(y_list, output_names)
+
+    if len(y_list) > 0:
+        summarize_outputs(y_list, output_names)
+    else:
+        raise ValueError(f"[check onnx] y list from session is empty")
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Check exported ONNX model")
@@ -95,6 +89,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--depth", type=int, default=128)
     parser.add_argument("--height", type=int, default=128)
     parser.add_argument("--width", type=int, default=128)
+    parser.add_argument("--train_root", type=str, required=True)
+    parser.add_argument("--val_root", type=str, required=True)
     parser.add_argument("--cpu_only", action="store_true")
 
     return parser.parse_args()
@@ -102,16 +98,23 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     
+    train_root = "dataset/ASNR-MICCAI-BraTS2023-GLI-Challenge-TrainingData/"
+    val_root = "dataset/ASNR-MICCAI-BraTS2023-GLI-Challenge-ValidationData/"
+        
+    train_entries, val_entries = build_entry_loaders(train_root, val_root)
+    
+    train_dataset, train_loader, val_dataset, val_loader = build_brats_loaders(train_entries, val_entries)
+    
+    # validation for checker
+    x = build_checker_input(val_loader)
+    
     model_path = str(Path(args.model))
     check_onnx_graph(model_path)
 
     session = make_session(model_path, use_cuda=True)
     print_model_io(session)
-
-    x = brats_input(
-        path_dir
-    )
-
+    
+    
     run_inference(session, x)
 
 

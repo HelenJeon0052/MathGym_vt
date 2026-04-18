@@ -5,7 +5,7 @@ include("save_nifti.jl")
 
 
 function main()
-    isempty(ARGS) && error("Usage: julia --project julia/main.jl path/to/dataset")
+    isempty(ARGS) && error("Usage: julia --project julia/main.jl path/to")
     case_dir = ARGS[1]
 
 
