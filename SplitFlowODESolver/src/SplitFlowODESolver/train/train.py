@@ -322,38 +322,46 @@ class MultiTaskCriterion(nn.Module):
             lambda_dice = 1.0,
             lambda_ce = 1.0
         )
-        self.cls_loss = nn.BCEWithLogitsLoss()
     
     def forward(self, output: Any, y_seg: torch.Tensor, y_case: torch.Tensor) -> Dict[str, torch.Tensor]:
-        if isinstance(output, MultiTaskOutput):
-            seg_logits = output.seg_logits
-            loss_seg = self.seg_loss(seg_logits, y_seg)
+        seg_logits = getattr(output, "seg_logits", None)
+        if seg_logits is not None:
+            if isinstance(output, MultiTaskOutput) and seg_logits.min().item() > 0:
+                loss_seg = self.sg_loss(seg_logits, y_seg)
 
-            loss_aux = torch.zeros((), device = seg_logits.device)
-            if output.aux_seg_logits is not None:
-                loss_aux = self.seg_loss(output.aux_seg_logits, y_seg)
-            
-            num_pos = (y_case == 1).sum().item()
-            num_neg = (y_case == 0).sum().item()
+                loss_aux = torch.zeros((), device = seg_logits.device)
+                if output.aux_seg_logits is not None:
+                    loss_aux = self.seg_loss(output.aux_seg_logits, y_seg)
+                    
+                num_pos = (y_case == 1).sum().item()
+                num_neg = (y_case == 0).sum().item()
 
-            pos_weight = torch.tensor([num_neg / num_pos], dtype = torch.float, device = seg.logits.device)
-            cls_loss = self.cls_loss(pos_weight = pos_weight)
-            
-            loss_cls = torch.zeros((), device = seg_logits.device)
-            if output.case_logits is not None:
-                loss_cls = cls_loss(output.case_logits.view(-1), y_case.view(-1))
-            
-            total_loss = loss_seg + self.lambda_aux * loss_aux + self.lambda_cls * loss_cls
+                if num_pos > 0:
+                    pos_weight = torch.tensor([num_neg / num_pos], dtype = torch.float, device = seg_logits.device)
+                        
+                else:
+                    pos_weight = torch.tensor([1.0], dtype = torch.float, device = seg_logits.device)
+                        
+                cls_loss_fn = BCEWithLogitsLoss(pos_weight = pos_weight)
+                loss_cls = torch.zeros((), device = seg_logits.device)
+                    
+                if output.case_logits is not None:
+                    loss_cls = cls_loss_fn(output.case_logits.view(-1), y_case.view(-1))
+                    
+                total_loss = loss_seg + self.lambda_aux_seg * loss_aux + self.lambda_cls * loss_cls
 
-            return {
-                "loss": total_loss,
-                "loss_seg": loss_seg,
-                "loss_aux": loss_aux,
-                "loss_cls": loss_cls
-            }
+                return {
+                    "loss": total_loss,
+                    "loss_seg": loss_seg,
+                    "loss_aux": loss_aux,
+                    "loss_cls": loss_cls
+                }
+
+            else:
+                raise ValueError(f"dice fn requires positive tensors")
         
-        if hasattr(output, "seg_logits") and output.seg_logits is not None:
-            seg_logits = output.seg_logits
+        elif hasattr(output, "seg_logits") and output.seg_logits is not None:
+            seg_logits = outputt.seg_logits
             loss_seg = self.seg_loss(seg_logits, y_seg)
 
             return {
@@ -384,6 +392,7 @@ def save_ckpt(path: str | Path, *, model: nn.Module, optimizer: torch.optim.Opti
 
     print(f"[train ckpt] saved {path}")
 
+
 def train_one(*, model, train_loader, optimizer, scheduler, device, epoch, criterion: MultiTaskCriterion) -> Dict[str, float]:
 
     model.train()
@@ -408,10 +417,13 @@ def train_one(*, model, train_loader, optimizer, scheduler, device, epoch, crite
 
         with autocast(device_type = device.type, dtype=amp_type):
             logits = model(x)
-
             logits_fp = logits.float()
+            
+            # to-be: preprocessing required
+            output = MultiTaskOutput(seg_logits=logits_fp)
 
-            losses = criterion(logits_fp, y_seg, y_case)
+            losses = criterion(output, y_seg, y_case)
+            loss = losses["loss"]
 
         if scaler.is_enabled():   
             scaler.scale(loss).backward()
@@ -426,7 +438,7 @@ def train_one(*, model, train_loader, optimizer, scheduler, device, epoch, crite
         # total_loss_dice += loss_dice.item()
         
         avg_losses = {k: v / max(1, len(train_loader)) for k, v in total_loss.items()}
-        pbar.set_postfix(loss=f"{losses['loss'].item():3f}", seg_loss=f"{losses['seg_loss'].item():.3f}", aux_loss = f"{losses['aux_loss'].item():.3f}")
+        pbar.set_postfix(loss=f"{loss:3f}", seg_loss=f"{losses['seg_loss'].item():.3f}", aux_loss = f"{losses['aux_loss'].item():.3f}")
     
     return {f"[train]_{k}": v / max(1, len(train_loader)) for k, v in total_losses.items()}
         
@@ -525,8 +537,8 @@ def main():
     
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
 
-    train_root = ""
-    val_root = ""
+    train_root = "../data/dataset/ASNR-MICCAI-BraTS2023-GLI-Challenge-TrainingData/"
+    val_root = "../data/dataset/ASNR-MICCAI-BraTS2023-GLI-Challenge-ValidationData/"
 
     train_entries, val_entries = build_entry_loaders(train_root, val_root)
     _, train_loader, _, val_loader = build_brats_loaders(train_entries, val_entries)
@@ -536,6 +548,7 @@ def main():
     # help(SwinUNETR)
 
     model = build_model(args).to(device)
+    print("Model type:", type(model))
 
     optimizer = Prodigy(model.parameters(), lr = 1e-4, weight_decay = 1e-2, betas = (0.9, 0.999), safeguard_warmup = True, use_bias_correction = True)
 
