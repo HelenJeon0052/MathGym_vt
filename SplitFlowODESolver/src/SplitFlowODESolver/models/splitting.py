@@ -40,7 +40,7 @@ class SplitODEBlock(nn.Module):
         integrator: Optional[Callable[..., torch.Tensor]] = None,
     ):
         super().__init__()
-        assert mode in ['lie', 'strang']
+        assert mode in ['lie', 'strang', 'adaptive']
         assert friction_position in ['pre', 'mid', 'post', 'symmetric']
 
         self.attn = attn_field
